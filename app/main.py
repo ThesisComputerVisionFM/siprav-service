@@ -1,6 +1,10 @@
+# main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import cameras
+from socketio import ASGIApp
+from app.routers.alert_stream import alert_emitter
+from app.routers.stream import camera_emitter
+from app.core.socket_server import sio  # Socket.IO centralizado
 
 app = FastAPI(
     title="Sistema de Monitoreo en Tiempo Real",
@@ -8,19 +12,27 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Middleware CORS para permitir conexión desde tu frontend en React
+# Socket.IO + FastAPI
+socket_app = ASGIApp(sio, other_asgi_app=app)
+
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    # Cambia esto al dominio de tu frontend si está en producción
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000"],  # Ajustar en producción
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
-)
+    allow_headers=["*"],)
 
-# Incluir routers HTTP
-app.include_router(cameras.router, prefix="/api/cameras", tags=["Cámaras"])
-# app.include_router(alerts.router, prefix="/api/alerts", tags=["Alertas"])
+# Eventos de arranque: iniciar las tareas de transmisión de cámaras y alertas
+ 
+@app.on_event("startup")
+async def startup_tasks():
+    print("✅ Alert emitter activo")
+    import asyncio
+    asyncio.create_task(camera_emitter())
+    asyncio.create_task(alert_emitter())
+
+# Ruta raíz simple para probar que el backend responde
 
 
 @app.get("/")

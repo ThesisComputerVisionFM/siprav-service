@@ -16,6 +16,8 @@ backend/
 |   ├── schemas/
 │   |   ├── alert_schema.py            # Pydantic models para la validación de datos
 │   |   ├── camera_schema.py            # Pydantic models para la validación de datos
+│   ├── services/                #
+│   │   ├── camera_streamer.py
 │   └── routers/
 │       ├── cameras.py         # Endpoints REST para CRUD de cámaras
 │       ├── alert.py         # Endpoints REST para CRUD de alertas
