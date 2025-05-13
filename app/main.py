@@ -18,7 +18,7 @@ socket_app = ASGIApp(sio, other_asgi_app=app)
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Ajustar en producción
+    allow_origins=["http://localhost:5173"],  # Ajustar en producción
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],)

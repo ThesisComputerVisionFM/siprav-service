@@ -7,7 +7,7 @@ from datetime import datetime
 from app.services.camera_registry import cameras
 from app.models.yolo_models import model_suspicious
 from app.core.socket_server import sio
-import random
+
 
 async def camera_emitter():
     while True:
@@ -54,7 +54,7 @@ async def camera_emitter():
         if payload:
             await sio.emit("cameras", payload)
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.1)
 
 """
 async def camera_emitter():
