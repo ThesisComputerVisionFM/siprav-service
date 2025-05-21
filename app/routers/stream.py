@@ -1,102 +1,42 @@
 # app/routers/stream.py
-# Transmisión de datos de cámaras en tiempo real usando socket.io
 import asyncio
-import base64
-import cv2
+# No necesitas base64 ni cv2 aquí si CameraStreamer hace todo el procesamiento
 from datetime import datetime
-from app.services.camera_registry import cameras
-from app.models.yolo_models import model_suspicious
+from app.services.camera_registry import cameras # o tu método preferido para obtenerlas
 from app.core.socket_server import sio
 
-
 async def camera_emitter():
+    print("Camera Emitter: Iniciado.")
     while True:
         payload = []
+        
+        # Filtrar por cámaras activas podría ser bueno
+        active_cams = [cam for cam in cameras.values() if cam.status in ["active", "reconnected"]]
 
-        for cam in cameras.values():
-            frame = cam.get_frame()
-            if frame is None:
+        for cam in active_cams: # Iterar sobre las cámaras del registry
+            b64_image_stream = cam.get_b64_stream() # Obtiene el stream ya procesado
+
+            if b64_image_stream is None:
+                # print(f"Camera Emitter: No hay stream b64 para {cam.camera_id}, status: {cam.get_status()}")
                 continue
 
-            # Procesamiento YOLO (modelo por ahora: actividad sospechosa)
-            results = model_suspicious.predict(
-                source=frame, conf=0.5, verbose=False)
-
-            detections = []
-            for r in results:
-                for box in r.boxes:
-                    cls_id = int(box.cls[0])
-                    class_name = model_suspicious.names[cls_id]
-                    conf = float(box.conf[0])
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    detections.append({
-                        "class": class_name,
-                        "confidence": round(conf, 2),
-                        "box": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
-                    })
-
-            # Codificar la imagen
-            _, buffer = cv2.imencode('.jpg', frame)
-            b64_img = base64.b64encode(buffer).decode('utf-8')
+            # Las detecciones y el conteo de personas también vienen de CameraStreamer
+            current_detections = cam.get_detections()
+            person_count_from_cam = cam.get_person_count()
 
             cam_data = {
                 "camera_id": cam.camera_id,
                 "location": cam.location,
-                "status": cam.status,
+                "status": cam.get_status(),
                 "timestamp": datetime.utcnow().isoformat() + "Z",
-                "stream": f"data:image/jpeg;base64,{b64_img}",
-                "person_count": 5,  # simulado, se actualizará con YOLO de personas
-                "detections": detections
+                "stream": b64_image_stream, # El string base64 ya listo
+                "person_count": person_count_from_cam,
+                "detections": current_detections
             }
-
             payload.append(cam_data)
             
         if payload:
             await sio.emit("cameras", payload)
 
-        await asyncio.sleep(0.1)
-
-"""
-async def camera_emitter():
-    posibles_eventos = ["persona", "caída", "actividad sospechosa", "arma", "incendio"]
-
-    while True:
-        payload = []
-
-        for cam in cameras.values():
-            frame = cam.get_frame()
-            if frame is None:
-                continue
-
-            # ⚠️ Simular detecciones de eventos aleatorios
-            evento_simulado = random.choice(posibles_eventos)
-            detections = [{
-                "class": evento_simulado,
-                "confidence": round(random.uniform(0.75, 0.99), 2),
-                "box": {"x1": 100, "y1": 100, "x2": 200, "y2": 200}
-            }]
-
-            # Guardar en el objeto de la cámara (para alert_stream.py)
-            cam.set_detections(detections)
-
-            # Codificar la imagen
-            _, buffer = cv2.imencode('.jpg', frame)
-            b64_img = base64.b64encode(buffer).decode('utf-8')
-
-            cam_data = {
-                "camera_id": cam.camera_id,
-                "location": cam.location,
-                "status": cam.status,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "stream": f"data:image/jpeg;base64,{b64_img}",
-                "person_count": 5,
-                "detections": detections
-            }
-
-            payload.append(cam_data)
-
-        if payload:
-            await sio.emit("cameras", payload)
-
-        await asyncio.sleep(2)
-"""
+        # Ajusta esta pausa según la fluidez deseada y la carga del sistema
+        await asyncio.sleep(0.0) # Ejemplo: emitir cada 200ms (5 FPS de actualización en el frontend)

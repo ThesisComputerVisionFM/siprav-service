@@ -1,61 +1,53 @@
-""" This file defines the Pydantic schemas for the camera data models."""
-import cv2
+# app/routers/stream.py
+import asyncio
 import base64
-import numpy as np
-from fastapi.responses import JSONResponse
-from fastapi import APIRouter
+import cv2 # Sigue siendo necesario para imencode
 from datetime import datetime
+# from app.services.camera_registry import cameras # Importar el diccionario directamente
+from app.services.camera_registry import get_all_cameras # O usar una función getter si la prefieres
+from app.core.socket_server import sio
+# El modelo YOLO ya no se carga ni usa aquí, se maneja en CameraStreamer
 
-from fastapi import APIRouter
-from app.schemas.camera_schema import CameraResponse, Detection, Box
-from app.services.camera_streamer import CameraStreamer
-from datetime import datetime
+async def camera_emitter():
+    print("Camera Emitter: Iniciado.")
+    while True:
+        payload = []
+        
+        # Usar get_all_cameras() si lo definiste en el registry
+        # o directamente cameras.values() si importaste cameras
+        active_cams = [cam for cam in get_all_cameras() if cam.status in ["active", "reconnected"]]
 
-router = APIRouter()
+        for cam in active_cams: # Iterar sobre las cámaras del registry
+            current_frame = cam.get_frame() # Obtiene el frame ya procesado (o no) por CameraStreamer
+            
+            if current_frame is None:
+                # print(f"Camera Emitter: No hay frame para {cam.camera_id}, status: {cam.get_status()}")
+                continue
 
-stream_url = "http://192.168.90.107:8080/video"
-streamer = CameraStreamer(stream_url)
-streamer.start()
+            # Las detecciones ya son generadas por CameraStreamer._process_frame
+            current_detections = cam.get_detections()
+            person_count_from_cam = cam.get_person_count()
 
-@router.get("/mock", response_model=CameraResponse)
-async def get_mock_camera_data():
-    return CameraResponse(
-        camera_id="cam_001",
-        location="Entrada principal",
-        stream_url="http://192.168.90.107:8080/video",  # ejemplo
-        status="active",
-        stream="data:image/jpeg;base64,...",  # imagen simulada
-        timestamp=datetime.utcnow(),
-        person_count=5,
-        detections=[
-            Detection(
-                class_="persona",
-                confidence=0.88,
-                box=Box(x1=132, y1=110, x2=220, y2=300)
-            ),
-            Detection(
-                class_="objeto_sospechoso",
-                confidence=0.76,
-                box=Box(x1=320, y1=150, x2=400, y2=250)
-            )
-        ]
-    )
+            # Codificar la imagen
+            _, buffer = cv2.imencode('.jpg', current_frame) # Usar el frame obtenido
+            b64_img = base64.b64encode(buffer).decode('utf-8')
 
+            cam_data = {
+                "camera_id": cam.camera_id,
+                "location": cam.location,
+                "status": cam.get_status(), # Obtener el estado actual de CameraStreamer
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "stream": f"data:image/jpeg;base64,{b64_img}",
+                "person_count": person_count_from_cam,
+                "detections": current_detections # Usar las detecciones de CameraStreamer
+            }
+            payload.append(cam_data)
+            
+        if payload:
+            # print(f"Camera Emitter: Emitiendo datos de {len(payload)} cámaras.")
+            await sio.emit("cameras", payload)
+        # else:
+            # print("Camera Emitter: No hay datos de cámaras para emitir en este ciclo.")
 
-@router.get("/test-stream")
-async def get_live_frame():
-    frame = streamer.get_frame()
-    if frame is None:
-        return JSONResponse(status_code=503, content={"error": "Esperando señal de la cámara..."})
-
-    _, buffer = cv2.imencode('.jpg', frame)
-    b64_img = base64.b64encode(buffer).decode('utf-8')
-
-    return {
-        "camera_id": "cam_prueba",
-        "location": "Test IP",
-        "stream_url": stream_url,
-        "status": "active",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "stream": f"data:image/jpeg;base64,{b64_img}"
-    }
+        await asyncio.sleep(0.1) # Frecuencia de emisión de Socket.IO (no de procesamiento de cámara)
+                                 # Esta pausa puede ser más corta, ya que solo emite datos ya listos.
